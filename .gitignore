@@ -1,0 +1,4 @@
+.env
+venv/
+testing_env/
+*.pyc

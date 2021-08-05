@@ -1,0 +1,17 @@
+name: model-env
+channels:
+  - conda-forge
+dependencies:
+  - python=3.7
+  - pip
+  - pip:
+    - azure
+    - azure-ml-api-sdk
+    - azureml-defaults
+    - inference-schema[numpy-support]
+    - joblib
+    - numpy
+    - pandas
+    - nltk
+    - editdistance
+    - dill
