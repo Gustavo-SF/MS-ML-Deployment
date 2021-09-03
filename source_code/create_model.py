@@ -5,6 +5,7 @@ import os
 import textwrap
 from urllib.parse import quote_plus
 
+import nltk
 from nltk import pos_tag
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
@@ -17,7 +18,7 @@ import pandas as pd
 import sqlalchemy
 
 
-SECRET_VARIABLES = ["SERVER_NAME", "DATABASE_NAME", "DB_LOGIN", "DB_PASSWORD"]
+SECRET_VARIABLES = ["SERVER_NAME", "DATABASE", "LOGIN_INPUT", "PASSWORD_INPUT"]
 DRIVER = "{ODBC Driver 17 for SQL Server}"
 
 
@@ -33,9 +34,9 @@ def fetch_azure_connection_string():
         f"""
         Driver={DRIVER};
         Server={server};
-        Database={secrets["DATABASE_NAME"]};
-        Uid={secrets["DB_LOGIN"]};
-        Pwd={secrets["DB_PASSWORD"]};
+        Database={secrets["DATABASE"]};
+        Uid={secrets["LOGIN_INPUT"]};
+        Pwd={secrets["PASSWORD_INPUT"]};
         Encrypt=yes;
         TrustServerCertificate=no;
         Connection Timeout=30;
@@ -51,7 +52,7 @@ class DB_Connection:
         self.crsr: pyodbc.Cursor = self.cnxn.cursor()
 
     def get_data(self):
-        sql_code = "SELECT Material, MaterialType, MaterialDescription FROM [PPP].[ZMM001]"
+        sql_code = "SELECT material_id, material_description FROM proc_db.zmm001 WHERE material_type = 'ZMAT'"
         return pd.read_sql(sql_code, self.cnxn)
 
     def run_query(self, sql_str=None, sql_file=None):
@@ -63,20 +64,7 @@ class DB_Connection:
         self.crsr.execute(sql_str)
         self.cnxn.commit()
         return True
-
-    def load_data(self, df, table, schema):
-        con_str = quote_plus(self.secrets)
-        con_str = "mssql+pyodbc:///?odbc_connect={}".format(con_str)
-        sql_engine = sqlalchemy.create_engine(con_str)
-        con = sql_engine.connect()
-        df.to_sql(con=con, name=table, if_exists="append", index=False, schema=schema, method="multi")
-        return True
-
-    def close(self):
-        self.cnxn.close()
-        return True
-
-
+        
 
 class MaterialDistanceCalculator:
     def __init__(self, dataframe):
@@ -96,6 +84,10 @@ class MaterialDistanceCalculator:
 
 
     def process_dataframe(self):
+        nltk.download("stopwords")
+        nltk.download("averaged_perceptron_tagger")
+        nltk.download("wordnet")
+
         self.df = self.df[self.df.MaterialType=="ZMAT"].copy()
         # clean text data
         self.df["description_clean"] = self.df["MaterialDescription"].apply(lambda x: self.clean_text(x) if x is not None else "")
@@ -142,46 +134,39 @@ class MaterialDistanceCalculator:
             return wordnet.NOUN
 
     @staticmethod
-    def dist_sentence(token1, token2):
+    def dist_sentence(sentence_1, sentence_2):
+        """Distance for sentence adapted from levenshtein but with no fixed order."""
         import editdistance as ed
         import numpy as np
 
-        """Distance for sentence adapted from levenshtein but with no fixed order."""
-        initial = token1 + '|' + token2
+        initial = sentence_1 + "|" + sentence_2
         
-        token1 = token1.split(' ')
-        token2 = token2.split(' ')
-            
-        m = len(token1)
-        n = len(token2)
+        sentence_1_set = set(sentence_1.split(' '))
+        sentence_2_set = set(sentence_2.split(' '))
         
-        if (m == 0) or (n == 0):
-            return 0
+        # Get the maximum length of the sentences to use in the end
+        # when we have to calculate the percentage of difference between 
+        # both sentences.
+        ln_max = max(len(sentence_1_set), len(sentence_2_set))
         
+        # Remove common words
+        sentence_1_list = list(sentence_1_set - sentence_2_set)
+        sentence_2_list = list(sentence_2_set - sentence_1_set)
+        
+        # Get the current lengths
+        m = len(sentence_1_list)
+        n = len(sentence_2_list)
         ln = max(m, n)
-        ln_max = ln
-        
-        # Remove identical words before checking if words are similar.
-        to_remove = []
-        for c in token1:
-            if c in token2:
-                to_remove.append(c)
-        
-        for c in set(to_remove):
-            token1.remove(c)
-            token2.remove(c)
-            ln -= 1
-            n -= 1
-            m -= 1
-        
+
         # Initialize distance variable
         distance = 0
         
         # Find similar words
-        for i, s1 in enumerate(token1):
-            if token2:
+        for i, s1 in enumerate(sentence_1_list):
+            # Continue if there are still values in sentence_2 list
+            if sentence_2_list:
                 values = np.zeros((1, n))
-                for j, s2 in enumerate(token2):
+                for j, s2 in enumerate(sentence_2_list):
                     l_word = max(len(s1),len(s2))
                     values[0,j] = ed.eval(s1, s2) / l_word
                 try:
@@ -189,12 +174,11 @@ class MaterialDistanceCalculator:
                 except:
                     print(initial)
                 if value < 0.33:
-                    index = np.argmax(values)
+                    index = np.argmin(values)
                     # Add relative leven distance to distance
                     distance += value
                     # Remove the tokens
-                    token1.remove(token1[i])
-                    token2.remove(token2[index])
+                    sentence_2_list.remove(sentence_2_list[index])
                     ln -= 1
                     n -= 1
         
@@ -213,5 +197,5 @@ if __name__ == "__main__":
 
     print("Instantiated")
     # Dumping into pickle
-    with open("ms-distance-calculator.pkl", "wb") as f:
+    with open("models/ms-distance-calculator.pkl", "wb") as f:
         dill.dump(mdc, f)
