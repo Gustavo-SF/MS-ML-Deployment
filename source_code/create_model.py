@@ -88,9 +88,8 @@ class MaterialDistanceCalculator:
         nltk.download("averaged_perceptron_tagger")
         nltk.download("wordnet")
 
-        self.df = self.df[self.df.MaterialType=="ZMAT"].copy()
         # clean text data
-        self.df["description_clean"] = self.df["MaterialDescription"].apply(lambda x: self.clean_text(x) if x is not None else "")
+        self.df["description_clean"] = self.df["material_description"].apply(lambda x: self.clean_text(x) if x is not None else "")
 
     def clean_text(self, text):
         # multiple functions to clean the t

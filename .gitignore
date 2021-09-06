@@ -1,4 +1,10 @@
+# Environment files
 .env
 venv/
-testing_env/
+
+# model
+*.pkl
+
+# Python compilation files
 *.pyc
+__pycache__/
